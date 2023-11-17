@@ -11,49 +11,76 @@ public class NotificationsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Validate([FromQuery] string validationToken = null)
     {
-
-        Console.WriteLine(200);
+        // If the validationToken is not null or empty, return it as ContentResult
         if (!string.IsNullOrEmpty(validationToken))
         {
-            return new ContentResult
-            {
-                Content = validationToken,
-                ContentType = "text/plain",
-                StatusCode = 200
-            };
-        }
-    
-        using var reader = new StreamReader(Request.Body);
-        var webhookPayloadStr = await reader.ReadToEndAsync();
-        JObject webhookPayload = null;
-        if (!string.IsNullOrEmpty(webhookPayloadStr))
-        {
-            var jsonObject = JObject.Parse(webhookPayloadStr);
-            webhookPayload = (JObject) jsonObject["value"][0];
+            return CreateContentResult(validationToken);
         }
 
+        // Read and parse the webhook payload from the Request Body
+        JObject webhookPayload = await ReadWebhookPayload();
+
+        // If the webhookPayload is not null, process the data
         if (webhookPayload != null)
         {
-            var resource = webhookPayload["resource"]?.ToString();
-            var tenantId = webhookPayload["tenantId"]?.ToString();
-
-            if (resource != null && tenantId != null)
-            {
-                var siteIdEndPos = resource.IndexOf("/lists/");
-                var siteId = resource.Substring(0, siteIdEndPos);
-                
-                var listIdStartPos = resource.LastIndexOf("/") + 1;
-                var listId = resource.Substring(listIdStartPos);
-
-                siteId = siteId.Replace("sites/", ""); // to remove "sites/" from the start
-
-                await SendDataToPort(siteId, listId, tenantId);
-            }
-
-            return Ok();
+            return await ProcessWebhookData(webhookPayload);
         }
 
+        // Return BadRequest if the validationToken and webhookPayload are both null or empty
         return BadRequest();
+    }
+
+    private ContentResult CreateContentResult(string validationToken)
+    {
+        return new ContentResult
+        {
+            Content = validationToken,
+            ContentType = "text/plain",
+            StatusCode = 200
+        };
+    }
+
+    private async Task<JObject> ReadWebhookPayload()
+    {
+        using var reader = new StreamReader(Request.Body);
+        var webhookPayloadStr = await reader.ReadToEndAsync();
+
+        if (!string.IsNullOrEmpty(webhookPayloadStr))
+        {
+           var jsonObject = JObject.Parse(webhookPayloadStr);
+           return (JObject) jsonObject["value"][0];
+        }
+
+        return null;
+    }
+
+    private async Task<IActionResult> ProcessWebhookData(JObject webhookPayload)
+    {
+        string resource = webhookPayload["resource"]?.ToString();
+        string tenantId = webhookPayload["tenantId"]?.ToString();
+
+        if (resource != null && tenantId != null)
+        {
+            string siteId, listId;
+
+            ExtractIds(resource, out siteId, out listId);
+
+            await SendDataToPort(siteId, listId, tenantId);
+            return Ok();
+        }
+        
+        return BadRequest();
+    }
+
+    private void ExtractIds(string resource, out string siteId, out string listId)
+    {
+        var siteIdEndPos = resource.IndexOf("/lists/");
+        siteId = resource.Substring(0, siteIdEndPos);
+
+        var listIdStartPos = resource.LastIndexOf("/") + 1;
+        listId = resource.Substring(listIdStartPos);
+
+        siteId = siteId.Replace("sites/", ""); // to remove "sites/" from the start
     }
 
     private readonly HttpClient _httpClient = new HttpClient();
