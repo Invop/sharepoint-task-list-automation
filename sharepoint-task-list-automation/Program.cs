@@ -20,9 +20,12 @@ internal class Program
             .Build();
         var appId = config["azureAppId"];
         var siteName = config["siteName"];
-        var tenatId = config["tenatId"];
+        var tenantId = config["tenantId"];
         var clientSecret = config["clientSecret"];
 
+        var graph = new GraphHandler(tenantId, appId, clientSecret, siteName);
+        await graph.SubscribeToChanges();
+        
         await StartServer();
 
 
@@ -33,35 +36,42 @@ internal class Program
     private static async Task StartServer()
     {
         HttpListener listener = new HttpListener();
-        // Добавление префикса, означающего, что сервер будет обслуживать все запросы по адресу "http://localhost:5002/"
         listener.Prefixes.Add("http://localhost:5002/");
-        // Запуск сервера для прослушивания входящих запросов
         listener.Start();
         while (true)
         {   
-            // Ожидание входящего запроса и получение контекста для дальнейшей обработки
             HttpListenerContext context = await listener.GetContextAsync();
-            // Обработка входящего запроса
-            await HandleRequest(context.Request);
+            await HandleRequest(context);
         }
     }
 
-    private static async Task HandleRequest(HttpListenerRequest request)
+    private static async Task HandleRequest(HttpListenerContext context)
     {
         string input;
-        // Создание потока для чтения содержимого запроса в асинхронном режиме
-        using (var reader = new StreamReader(request.InputStream, request.ContentEncoding))
-        {   // Чтение всего содержимого запроса и сохранение его в переменную input
+        using (var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding))
+        {
             input = await reader.ReadToEndAsync();
         }
-        // Вывод на консоль полученного запроса
         Console.WriteLine("Received request: " + input);
-        // Преобразование строкового значения запроса в объект JSON
         JObject json = JObject.Parse(input);
-        // Извлечение значения свойства "SiteId","ListId","TenantId" из объекта JSON и сохранение его в переменную siteId
         var siteId = json["SiteId"]?.ToString();
         var listId = json["ListId"]?.ToString();
-        var tenatId = json["TenantId"]?.ToString();
+        var tenantId = json["TenantId"]?.ToString();
+
+        HttpListenerResponse response = context.Response;
+
+        string responseContent = "{ \"Status\": \"Success\" }"; 
+
+        byte[] buffer = Encoding.UTF8.GetBytes(responseContent);
+
+        response.ContentType = "application/json";
+        response.ContentLength64 = buffer.Length;
+        response.StatusCode = 200;
+
+        using (Stream output = response.OutputStream) 
+        {
+            await output.WriteAsync(buffer, 0, buffer.Length);
+        }
     }
     
 }
